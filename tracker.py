@@ -5,7 +5,8 @@ from tkinter import messagebox
 import json
 import os
 
-# Stores previously fetched results: {'username': {'followers': set(), 'following': set(), 'not_following_back': set()}}
+import datetime
+# Stores previously fetched results: {'username': {'followers': set(), 'following': set(), 'not_following_back': set(), 'follower_timestamps': {user: timestamp}}}
 previous_results = {}
 DATA_FILE = "github_tracker_data.json"
 
@@ -41,24 +42,31 @@ def load_previous_results():
                     entry.delete(0, tk.END)
                     entry.insert(0, last_username)
 
-                # Load user tracking data and convert lists back to sets
+                # Load user tracking data and convert lists back to sets/dicts
                 user_data_loaded = loaded_data.get("users", {})
                 for username, categories in user_data_loaded.items():
                     previous_results[username] = {}
                     for category, user_list in categories.items():
-                        previous_results[username][category] = set(user_list)
+                        if category in ("follower_timestamps", "following_timestamps"):
+                            previous_results[username][category] = dict(user_list)
+                        else:
+                            previous_results[username][category] = set(user_list)
         except (json.JSONDecodeError, IOError) as e:
             messagebox.showerror("Load Error", f"Could not load previous data: {e}")
             previous_results = {} # Reset to empty if file is corrupt
             if entry:
                 entry.delete(0, tk.END) # Clear entry field on load error
 
+
 def save_previous_results():
     users_data_to_save = {}
     for username, categories in previous_results.items():
         users_data_to_save[username] = {}
         for category, user_set in categories.items():
-            users_data_to_save[username][category] = list(user_set)
+            if category in ("follower_timestamps", "following_timestamps"):
+                users_data_to_save[username][category] = dict(user_set)
+            else:
+                users_data_to_save[username][category] = list(user_set)
 
     data_to_save = {
         "_metadata": {"last_username": entry.get() if entry else ""}, # Get current username from entry
@@ -72,20 +80,53 @@ def save_previous_results():
 
 
 def update_result_display(username, category_key, current_data_list, full_title, empty_list_message):
-    """Clears the result_text, displays the title, and lists users, highlighting new ones."""
-    result_text.delete(1.0, tk.END)
-    result_text.insert(tk.END, f"{full_title}\n")
+    """Clears the result_text, displays the title, and lists users, highlighting new ones. For followers, also show and store first-seen timestamp."""
+    # Clear previous content
+    for item in result_tree.get_children():
+        result_tree.delete(item)
+
+    # Show title as a label above the treeview
+    if hasattr(update_result_display, "title_label") and update_result_display.title_label:
+        update_result_display.title_label.config(text=full_title)
+    else:
+        update_result_display.title_label = ttk.Label(result_frame, text=full_title, font=("Arial", 11, "bold"))
+        update_result_display.title_label.pack(side=tk.TOP, anchor="w", pady=(0, 5))
 
     old_data_set = previous_results.get(username, {}).get(category_key, set())
+    # Prepare timestamps dict for followers and following
+    if username not in previous_results:
+        previous_results[username] = {}
+    if category_key == "followers":
+        if "follower_timestamps" not in previous_results[username]:
+            previous_results[username]["follower_timestamps"] = {}
+        timestamps = previous_results[username]["follower_timestamps"]
+    elif category_key == "following":
+        if "following_timestamps" not in previous_results[username]:
+            previous_results[username]["following_timestamps"] = {}
+        timestamps = previous_results[username]["following_timestamps"]
+    else:
+        timestamps = None
 
-    if current_data_list: # If the list is not empty
+    if current_data_list:
         for user_login in current_data_list:
-            if user_login not in old_data_set:
-                result_text.insert(tk.END, f"{user_login}\n", "new_user_tag")
+            # Zeitstempel setzen, falls neu (für followers und following)
+            timestamp_str = ""
+            if category_key in ("followers", "following"):
+                if user_login not in timestamps:
+                    timestamps[user_login] = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
+                timestamp_str = timestamps[user_login]
+            # Mark new users (not in old_data_set) with a tag
+            tags = ("new_user_tag",) if user_login not in old_data_set else ()
+            if category_key in ("followers", "following"):
+                result_tree.insert("", tk.END, values=(user_login, timestamp_str), tags=tags)
             else:
-                result_text.insert(tk.END, f"{user_login}\n")
-    else: # List is empty (successful API call, but no items)
-        result_text.insert(tk.END, f"{empty_list_message}\n")
+                result_tree.insert("", tk.END, values=(user_login, ""), tags=tags)
+    else:
+        # Show empty message as a single row
+        result_tree.insert("", tk.END, values=(empty_list_message, ""))
+
+    # Tag config for new users (yellow background)
+    result_tree.tag_configure("new_user_tag", background="yellow", foreground="black")
 
     # Update previous_results with the new successfully fetched data
     if username not in previous_results:
@@ -182,16 +223,21 @@ following_button.pack(side=tk.LEFT, padx=5)
 not_following_back_button = ttk.Button(button_frame, text="Not Following Back", command=find_users_not_following_back)
 not_following_back_button.pack(side=tk.LEFT, padx=5)
 
-# Create a text box to display the result
-result_text = tk.Text(window, height=15, width=50) # Increased height and width
-result_text.pack()
-result_text.tag_configure("new_user_tag", background="yellow", foreground="black")
+# Create a Treeview to display the result in columns
+result_frame = ttk.Frame(window)
+result_frame.pack(fill=tk.BOTH, expand=True)
 
-# Configure the text box with a scroll bar
-scrollbar = ttk.Scrollbar(window, orient=tk.VERTICAL, command=result_text.yview)
+result_tree = ttk.Treeview(result_frame, columns=("username", "timestamp"), show="headings", height=15)
+result_tree.heading("username", text="Username")
+result_tree.heading("timestamp", text="Erstmals entdeckt/folgt seit")
+result_tree.column("username", width=200)
+result_tree.column("timestamp", width=200)
+result_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+# Add vertical scrollbar
+scrollbar = ttk.Scrollbar(result_frame, orient=tk.VERTICAL, command=result_tree.yview)
+result_tree.configure(yscrollcommand=scrollbar.set)
 scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-result_text.configure(yscrollcommand=scrollbar.set)
 
 # Start the UI main loop
 window.mainloop()
