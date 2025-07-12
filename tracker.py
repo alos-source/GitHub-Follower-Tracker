@@ -3,7 +3,9 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 import json
+
 import os
+import webbrowser
 
 import datetime
 # Stores previously fetched results: {'username': {'followers': set(), 'following': set(), 'not_following_back': set(), 'follower_timestamps': {user: timestamp}}}
@@ -25,7 +27,7 @@ def fetch_github_data(username, endpoint_type):
                 # Rate limit exceeded or too many requests
                 messagebox.showwarning(
                     "Rate Limit",
-                    "GitHub API-Rate-Limit erreicht oder zu viele Anfragen. Es werden nur lokale/offline gespeicherte Daten angezeigt."
+                    "GitHub API rate limit reached or too many requests. Only locally/offline stored data will be shown."
                 )
                 return None
             response.raise_for_status()
@@ -101,19 +103,19 @@ def update_result_display(username, category_key, current_data_list, full_title,
     # Zähler aktualisieren
     followers_count = len(previous_results.get(username, {}).get("followers", []))
     following_count = len(previous_results.get(username, {}).get("following", []))
-    followers_count_label.config(text=f"Follower: {followers_count}")
+    followers_count_label.config(text=f"Followers: {followers_count}")
     following_count_label.config(text=f"Following: {following_count}")
     """Clears the result_text, displays the title, and lists users, highlighting new ones. For followers, also show and store first-seen timestamp."""
     # Clear previous content
     for item in result_tree.get_children():
         result_tree.delete(item)
 
-    # Show title as a label above the treeview
+    # Remove any existing title label before creating a new one
     if hasattr(update_result_display, "title_label") and update_result_display.title_label:
-        update_result_display.title_label.config(text=full_title)
-    else:
-        update_result_display.title_label = ttk.Label(result_frame, text=full_title, font=("Arial", 11, "bold"))
-        update_result_display.title_label.pack(side=tk.TOP, anchor="w", pady=(0, 5))
+        update_result_display.title_label.destroy()
+        update_result_display.title_label = None
+    update_result_display.title_label = ttk.Label(result_frame, text=full_title, font=("Arial", 11, "bold"))
+    update_result_display.title_label.pack(fill=tk.X, pady=(0, 5), before=result_tree)
 
     old_data_set = previous_results.get(username, {}).get(category_key, set())
     # Prepare timestamps dict for followers and following
@@ -131,7 +133,7 @@ def update_result_display(username, category_key, current_data_list, full_title,
         timestamps = None
 
     if current_data_list:
-        # Für 'following' die aktuelle Follower-Liste holen (für Spalte 'Folgt zurück?')
+        # For 'following', get the current followers list (for 'Follows back?' column)
         followers_set = None
         if category_key == "following":
             followers = get_user_followers(username)
@@ -141,7 +143,7 @@ def update_result_display(username, category_key, current_data_list, full_title,
                 followers_set = set(followers)
 
         for user_login in current_data_list:
-            # Zeitstempel setzen, falls neu (für followers und following)
+            # Set timestamp if new (for followers and following)
             timestamp_str = ""
             if category_key in ("followers", "following"):
                 if user_login not in timestamps:
@@ -154,7 +156,7 @@ def update_result_display(username, category_key, current_data_list, full_title,
                 if followers_set is None:
                     follows_back = "?"
                 else:
-                    follows_back = "Ja" if user_login in followers_set else "Nein"
+                    follows_back = "Yes" if user_login in followers_set else "No"
                 result_tree.insert("", tk.END, values=(user_login, timestamp_str, follows_back), tags=tags)
             elif category_key == "followers":
                 result_tree.insert("", tk.END, values=(user_login, timestamp_str, ""), tags=tags)
@@ -184,10 +186,10 @@ def display_followers():
 
     followers_list = get_user_followers(username)
     if followers_list is None:
-        # API call failed, versuche lokale Daten zu verwenden
+        # API call failed, try to use local data
         followers_list = list(previous_results.get(username, {}).get("followers", []))
         if not followers_list:
-            messagebox.showwarning("Warning", "Keine aktuellen oder gespeicherten Follower-Daten verfügbar.")
+            messagebox.showwarning("Warning", "No current or saved follower data available.")
     update_result_display(
         username,
         "followers",
@@ -204,10 +206,10 @@ def display_following():
 
     following_list = get_user_following(username)
     if following_list is None:
-        # API call failed, versuche lokale Daten zu verwenden
+        # API call failed, try to use local data
         following_list = list(previous_results.get(username, {}).get("following", []))
         if not following_list:
-            messagebox.showwarning("Warning", "Keine aktuellen oder gespeicherten Following-Daten verfügbar.")
+            messagebox.showwarning("Warning", "No current or saved following data available.")
     update_result_display(
         username,
         "following",
@@ -221,6 +223,7 @@ def display_following():
 window = tk.Tk()
 window.title("GitHub Follower Analyzer")
 window.geometry("500x450") # Increased window size
+
 
 # Create a label and an entry field for the username
 label = ttk.Label(window, text="Enter your GitHub username:")
@@ -270,24 +273,42 @@ def treeview_sort_column(treeview, col, reverse):
     # Reverse sort next time
     treeview.heading(col, command=lambda: treeview_sort_column(treeview, col, not reverse))
 
+
+
+# --- Treeview with sortable columns (all English) ---
 result_tree = ttk.Treeview(result_frame, columns=("username", "timestamp", "follows_back"), show="headings", height=15)
 result_tree.heading("username", text="Username", command=lambda: treeview_sort_column(result_tree, "username", False))
-result_tree.heading("timestamp", text="Erstmals entdeckt/folgt seit", command=lambda: treeview_sort_column(result_tree, "timestamp", False))
-result_tree.heading("follows_back", text="Folgt zurück?", command=lambda: treeview_sort_column(result_tree, "follows_back", False))
+result_tree.heading("timestamp", text="First seen / following since", command=lambda: treeview_sort_column(result_tree, "timestamp", False))
+result_tree.heading("follows_back", text="Follows back?", command=lambda: treeview_sort_column(result_tree, "follows_back", False))
 result_tree.column("username", width=180)
 result_tree.column("timestamp", width=180)
 result_tree.column("follows_back", width=100, anchor="center")
 result_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+# --- Double-click to open user profile in browser ---
+def on_treeview_double_click(event):
+    item_id = result_tree.identify_row(event.y)
+    if not item_id:
+        return
+    values = result_tree.item(item_id, "values")
+    if not values or not values[0] or values[0].startswith("("):
+        return  # Ignore empty/placeholder rows
+    username = values[0]
+    url = f"https://github.com/{username}"
+    webbrowser.open_new_tab(url)
+
+result_tree.bind("<Double-1>", on_treeview_double_click)
+
 
 # Add vertical scrollbar
 scrollbar = ttk.Scrollbar(result_frame, orient=tk.VERTICAL, command=result_tree.yview)
 result_tree.configure(yscrollcommand=scrollbar.set)
 scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-# Labels für Follower- und Following-Anzahl
+# Labels for follower and following count
 count_frame = ttk.Frame(window)
 count_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
-followers_count_label = ttk.Label(count_frame, text="Follower: 0")
+followers_count_label = ttk.Label(count_frame, text="Followers: 0")
 followers_count_label.pack(side=tk.LEFT, padx=10)
 following_count_label = ttk.Label(count_frame, text="Following: 0")
 following_count_label.pack(side=tk.LEFT, padx=10)
