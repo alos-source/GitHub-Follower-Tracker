@@ -13,11 +13,29 @@ DATA_FILE = "github_tracker_data.json"
 def fetch_github_data(username, endpoint_type):
     """Fetches data from a GitHub API endpoint (followers or following).
     Returns a list of logins on success, None on failure."""
-    url = f"https://api.github.com/users/{username}/{endpoint_type}"
+    # Paginierung: alle Seiten laden
+    all_logins = []
+    page = 1
+    per_page = 100
     try:
-        response = requests.get(url)
-        response.raise_for_status()  # Raises an HTTPError for bad responses (4XX or 5XX)
-        return [item["login"] for item in response.json()]
+        while True:
+            url = f"https://api.github.com/users/{username}/{endpoint_type}?per_page={per_page}&page={page}"
+            response = requests.get(url)
+            if response.status_code in (403, 429):
+                # Rate limit exceeded or too many requests
+                messagebox.showwarning(
+                    "Rate Limit",
+                    "GitHub API-Rate-Limit erreicht oder zu viele Anfragen. Es werden nur lokale/offline gespeicherte Daten angezeigt."
+                )
+                return None
+            response.raise_for_status()
+            data = response.json()
+            logins = [item["login"] for item in data]
+            all_logins.extend(logins)
+            if len(data) < per_page:
+                break
+            page += 1
+        return all_logins
     except requests.exceptions.RequestException as e:
         messagebox.showerror("Error", f"Failed to retrieve {endpoint_type} for {username}.\n{e}")
         return None
@@ -80,6 +98,11 @@ def save_previous_results():
 
 
 def update_result_display(username, category_key, current_data_list, full_title, empty_list_message):
+    # Zähler aktualisieren
+    followers_count = len(previous_results.get(username, {}).get("followers", []))
+    following_count = len(previous_results.get(username, {}).get("following", []))
+    followers_count_label.config(text=f"Follower: {followers_count}")
+    following_count_label.config(text=f"Following: {following_count}")
     """Clears the result_text, displays the title, and lists users, highlighting new ones. For followers, also show and store first-seen timestamp."""
     # Clear previous content
     for item in result_tree.get_children():
@@ -108,6 +131,15 @@ def update_result_display(username, category_key, current_data_list, full_title,
         timestamps = None
 
     if current_data_list:
+        # Für 'following' die aktuelle Follower-Liste holen (für Spalte 'Folgt zurück?')
+        followers_set = None
+        if category_key == "following":
+            followers = get_user_followers(username)
+            if followers is None:
+                followers_set = None  # Mark as unknown
+            else:
+                followers_set = set(followers)
+
         for user_login in current_data_list:
             # Zeitstempel setzen, falls neu (für followers und following)
             timestamp_str = ""
@@ -117,13 +149,23 @@ def update_result_display(username, category_key, current_data_list, full_title,
                 timestamp_str = timestamps[user_login]
             # Mark new users (not in old_data_set) with a tag
             tags = ("new_user_tag",) if user_login not in old_data_set else ()
-            if category_key in ("followers", "following"):
-                result_tree.insert("", tk.END, values=(user_login, timestamp_str), tags=tags)
+
+            if category_key == "following":
+                if followers_set is None:
+                    follows_back = "?"
+                else:
+                    follows_back = "Ja" if user_login in followers_set else "Nein"
+                result_tree.insert("", tk.END, values=(user_login, timestamp_str, follows_back), tags=tags)
+            elif category_key == "followers":
+                result_tree.insert("", tk.END, values=(user_login, timestamp_str, ""), tags=tags)
             else:
-                result_tree.insert("", tk.END, values=(user_login, ""), tags=tags)
+                result_tree.insert("", tk.END, values=(user_login, "", ""), tags=tags)
     else:
         # Show empty message as a single row
-        result_tree.insert("", tk.END, values=(empty_list_message, ""))
+        if category_key == "following":
+            result_tree.insert("", tk.END, values=(empty_list_message, "", ""))
+        else:
+            result_tree.insert("", tk.END, values=(empty_list_message, "", ""))
 
     # Tag config for new users (yellow background)
     result_tree.tag_configure("new_user_tag", background="yellow", foreground="black")
@@ -141,9 +183,11 @@ def display_followers():
         return
 
     followers_list = get_user_followers(username)
-    if followers_list is None: # API call failed, messagebox already shown by fetch_github_data
-        return
-
+    if followers_list is None:
+        # API call failed, versuche lokale Daten zu verwenden
+        followers_list = list(previous_results.get(username, {}).get("followers", []))
+        if not followers_list:
+            messagebox.showwarning("Warning", "Keine aktuellen oder gespeicherten Follower-Daten verfügbar.")
     update_result_display(
         username,
         "followers",
@@ -159,9 +203,11 @@ def display_following():
         return
 
     following_list = get_user_following(username)
-    if following_list is None: # API call failed
-        return
-
+    if following_list is None:
+        # API call failed, versuche lokale Daten zu verwenden
+        following_list = list(previous_results.get(username, {}).get("following", []))
+        if not following_list:
+            messagebox.showwarning("Warning", "Keine aktuellen oder gespeicherten Following-Daten verfügbar.")
     update_result_display(
         username,
         "following",
@@ -170,29 +216,6 @@ def display_following():
         "(This user is not following anyone.)"
     )
 
-def find_users_not_following_back():
-    username = entry.get()
-    if not username:
-        messagebox.showwarning("Warning", "Please enter your GitHub username.")
-        return
-
-    followers_list = get_user_followers(username)
-    if followers_list is None:
-        return # Error already shown, cannot proceed
-
-    following_list = get_user_following(username)
-    if following_list is None:
-        return # Error already shown, cannot proceed
-
-    not_following_back_list = [user for user in following_list if user not in followers_list]
-
-    update_result_display(
-        username,
-        "not_following_back",
-        not_following_back_list,
-        f"Users not following {username} back:",
-        "(No users found who are not following you back.)"
-    )
 
 # Create the main window
 window = tk.Tk()
@@ -220,24 +243,54 @@ followers_button.pack(side=tk.LEFT, padx=5)
 following_button = ttk.Button(button_frame, text="Show Following", command=display_following)
 following_button.pack(side=tk.LEFT, padx=5)
 
-not_following_back_button = ttk.Button(button_frame, text="Not Following Back", command=find_users_not_following_back)
-not_following_back_button.pack(side=tk.LEFT, padx=5)
 
 # Create a Treeview to display the result in columns
 result_frame = ttk.Frame(window)
 result_frame.pack(fill=tk.BOTH, expand=True)
 
-result_tree = ttk.Treeview(result_frame, columns=("username", "timestamp"), show="headings", height=15)
-result_tree.heading("username", text="Username")
-result_tree.heading("timestamp", text="Erstmals entdeckt/folgt seit")
-result_tree.column("username", width=200)
-result_tree.column("timestamp", width=200)
+
+# --- Treeview mit sortierbaren Spalten ---
+def treeview_sort_column(treeview, col, reverse):
+    # Get all items and their values for the given column
+    data = [(treeview.set(k, col), k) for k in treeview.get_children("")]
+    # Try to convert to datetime for timestamp, or to string otherwise
+    if col == "timestamp":
+        from datetime import datetime
+        def parse_dt(val):
+            try:
+                return datetime.fromisoformat(val)
+            except Exception:
+                return val
+        data.sort(key=lambda t: parse_dt(t[0]), reverse=reverse)
+    else:
+        data.sort(key=lambda t: t[0].lower() if isinstance(t[0], str) else t[0], reverse=reverse)
+    # Rearrange items in sorted positions
+    for index, (val, k) in enumerate(data):
+        treeview.move(k, '', index)
+    # Reverse sort next time
+    treeview.heading(col, command=lambda: treeview_sort_column(treeview, col, not reverse))
+
+result_tree = ttk.Treeview(result_frame, columns=("username", "timestamp", "follows_back"), show="headings", height=15)
+result_tree.heading("username", text="Username", command=lambda: treeview_sort_column(result_tree, "username", False))
+result_tree.heading("timestamp", text="Erstmals entdeckt/folgt seit", command=lambda: treeview_sort_column(result_tree, "timestamp", False))
+result_tree.heading("follows_back", text="Folgt zurück?", command=lambda: treeview_sort_column(result_tree, "follows_back", False))
+result_tree.column("username", width=180)
+result_tree.column("timestamp", width=180)
+result_tree.column("follows_back", width=100, anchor="center")
 result_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
 # Add vertical scrollbar
 scrollbar = ttk.Scrollbar(result_frame, orient=tk.VERTICAL, command=result_tree.yview)
 result_tree.configure(yscrollcommand=scrollbar.set)
 scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+# Labels für Follower- und Following-Anzahl
+count_frame = ttk.Frame(window)
+count_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
+followers_count_label = ttk.Label(count_frame, text="Follower: 0")
+followers_count_label.pack(side=tk.LEFT, padx=10)
+following_count_label = ttk.Label(count_frame, text="Following: 0")
+following_count_label.pack(side=tk.LEFT, padx=10)
 
 # Start the UI main loop
 window.mainloop()
