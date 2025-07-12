@@ -99,12 +99,21 @@ def save_previous_results():
         messagebox.showerror("Save Error", f"Could not save data: {e}")
 
 
+def get_last_update(username, category):
+    return previous_results.get(username, {}).get('last_update', {}).get(category)
+
 def update_result_display(username, category_key, current_data_list, full_title, empty_list_message):
     # Zähler aktualisieren
     followers_count = len(previous_results.get(username, {}).get("followers", []))
     following_count = len(previous_results.get(username, {}).get("following", []))
     followers_count_label.config(text=f"Followers: {followers_count}")
     following_count_label.config(text=f"Following: {following_count}")
+    # Show last update timestamp for current category
+    last_update = previous_results.get(username, {}).get('last_update', {}).get(category_key)
+    if last_update:
+        last_update_label.config(text=f"Last update: {last_update}")
+    else:
+        last_update_label.config(text="Last update: -")
     """Clears the result_text, displays the title, and lists users, highlighting new ones. For followers, also show and store first-seen timestamp."""
     # Clear previous content
     for item in result_tree.get_children():
@@ -178,15 +187,22 @@ def update_result_display(username, category_key, current_data_list, full_title,
     previous_results[username][category_key] = set(current_data_list)
     save_previous_results() # Save after updating
 
-def display_followers():
+def display_followers(force_refresh=False):
     username = entry.get()
     if not username:
         messagebox.showwarning("Warning", "Please enter your GitHub username.")
         return
 
-    followers_list = get_user_followers(username)
+    followers_list = None
+    if force_refresh or not previous_results.get(username, {}).get("followers"):
+        followers_list = get_user_followers(username)
+        if followers_list is not None:
+            if username not in previous_results:
+                previous_results[username] = {}
+            if 'last_update' not in previous_results[username]:
+                previous_results[username]['last_update'] = {}
+            previous_results[username]['last_update']['followers'] = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
     if followers_list is None:
-        # API call failed, try to use local data
         followers_list = list(previous_results.get(username, {}).get("followers", []))
         if not followers_list:
             messagebox.showwarning("Warning", "No current or saved follower data available.")
@@ -198,15 +214,22 @@ def display_followers():
         "(No followers found for this user.)"
     )
 
-def display_following():
+def display_following(force_refresh=False):
     username = entry.get()
     if not username:
         messagebox.showwarning("Warning", "Please enter your GitHub username.")
         return
 
-    following_list = get_user_following(username)
+    following_list = None
+    if force_refresh or not previous_results.get(username, {}).get("following"):
+        following_list = get_user_following(username)
+        if following_list is not None:
+            if username not in previous_results:
+                previous_results[username] = {}
+            if 'last_update' not in previous_results[username]:
+                previous_results[username]['last_update'] = {}
+            previous_results[username]['last_update']['following'] = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
     if following_list is None:
-        # API call failed, try to use local data
         following_list = list(previous_results.get(username, {}).get("following", []))
         if not following_list:
             messagebox.showwarning("Warning", "No current or saved following data available.")
@@ -240,11 +263,17 @@ button_frame = ttk.Frame(window)
 button_frame.pack(pady=10)
 
 # Create buttons for different actions
-followers_button = ttk.Button(button_frame, text="Show Followers", command=display_followers)
+followers_button = ttk.Button(button_frame, text="Show Followers", command=lambda: display_followers(False))
 followers_button.pack(side=tk.LEFT, padx=5)
 
-following_button = ttk.Button(button_frame, text="Show Following", command=display_following)
+following_button = ttk.Button(button_frame, text="Show Following", command=lambda: display_following(False))
 following_button.pack(side=tk.LEFT, padx=5)
+
+refresh_followers_button = ttk.Button(button_frame, text="Refresh Followers", command=lambda: display_followers(True))
+refresh_followers_button.pack(side=tk.LEFT, padx=5)
+
+refresh_following_button = ttk.Button(button_frame, text="Refresh Following", command=lambda: display_following(True))
+refresh_following_button.pack(side=tk.LEFT, padx=5)
 
 
 # Create a Treeview to display the result in columns
@@ -305,13 +334,15 @@ scrollbar = ttk.Scrollbar(result_frame, orient=tk.VERTICAL, command=result_tree.
 result_tree.configure(yscrollcommand=scrollbar.set)
 scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-# Labels for follower and following count
+# Labels for follower and following count and last update
 count_frame = ttk.Frame(window)
 count_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
 followers_count_label = ttk.Label(count_frame, text="Followers: 0")
 followers_count_label.pack(side=tk.LEFT, padx=10)
 following_count_label = ttk.Label(count_frame, text="Following: 0")
 following_count_label.pack(side=tk.LEFT, padx=10)
+last_update_label = ttk.Label(count_frame, text="Last update: -")
+last_update_label.pack(side=tk.LEFT, padx=10)
 
 # Start the UI main loop
 window.mainloop()
