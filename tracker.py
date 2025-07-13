@@ -367,9 +367,12 @@ detail_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 detail_vars = {
     "location": tk.StringVar(value="Location: -"),
     "public_repos": tk.StringVar(value="Public repos: -"),
+    "public_gists": tk.StringVar(value="Public gists: -"),
     "following": tk.StringVar(value="Following: -"),
     "followers": tk.StringVar(value="Followers: -"),
     "created_at": tk.StringVar(value="Created at: -"),
+    "site_admin": tk.StringVar(value="Site admin: -"),
+    "score": tk.StringVar(value="Community Score: -"),
 }
 for var in detail_vars.values():
     ttk.Label(detail_frame, textvariable=var).pack(anchor="w")
@@ -379,6 +382,28 @@ if "user_details" not in previous_results:
     previous_results["user_details"] = {}
 
 import threading
+from datetime import datetime
+
+def calculate_score(details):
+    # Einfache Score-Logik: Gewichtung kann angepasst werden
+    followers = int(details.get("followers", 0) or 0)
+    public_repos = int(details.get("public_repos", 0) or 0)
+    public_gists = int(details.get("public_gists", 0) or 0)
+    created_at = details.get("created_at", "")
+    site_admin = details.get("site_admin", False)
+    # Account-Alter in Jahren
+    try:
+        years = (datetime.now() - datetime.fromisoformat(created_at.replace("Z", ""))).days / 365.25 if created_at else 0
+    except Exception:
+        years = 0
+    score = (
+        followers * 2 +
+        public_repos * 1.5 +
+        public_gists * 1 +
+        years * 2 +
+        (20 if site_admin else 0)
+    )
+    return int(score)
 
 def fetch_and_show_user_details(username):
     # Check cache first
@@ -400,10 +425,13 @@ def fetch_and_show_user_details(username):
             user_details = {
                 "location": data.get("location", "-"),
                 "public_repos": data.get("public_repos", "-"),
+                "public_gists": data.get("public_gists", "-"),
                 "following": data.get("following", "-"),
                 "followers": data.get("followers", "-"),
                 "created_at": data.get("created_at", "-"),
+                "site_admin": data.get("site_admin", False),
             }
+            user_details["score"] = calculate_score(user_details)
             previous_results["user_details"][username] = user_details
             save_previous_results()
             window.after(0, lambda: update_detail_panel(user_details))
@@ -416,10 +444,12 @@ def fetch_and_show_user_details(username):
 def update_detail_panel(user_details):
     detail_vars["location"].set(f"Location: {user_details.get('location', '-')}")
     detail_vars["public_repos"].set(f"Public repos: {user_details.get('public_repos', '-')}")
+    detail_vars["public_gists"].set(f"Public gists: {user_details.get('public_gists', '-')}")
     detail_vars["following"].set(f"Following: {user_details.get('following', '-')}")
     detail_vars["followers"].set(f"Followers: {user_details.get('followers', '-')}")
     detail_vars["created_at"].set(f"Created at: {user_details.get('created_at', '-')}")
-
+    detail_vars["site_admin"].set(f"Site admin: {'Yes' if user_details.get('site_admin', False) else 'No'}")
+    detail_vars["score"].set(f"Community Score: {user_details.get('score', '-')}")
 
 # --- Double-click to fetch and show details ---
 def on_treeview_double_click(event):
@@ -431,11 +461,31 @@ def on_treeview_double_click(event):
         return  # Ignore empty/placeholder rows
     username = values[0]
     fetch_and_show_user_details(username)
-    # Optional: open in browser as before
-    # url = f"https://github.com/{username}"
-    # webbrowser.open_new_tab(url)
 
 result_tree.bind("<Double-1>", on_treeview_double_click)
+
+# --- Always update details on selection change ---
+def on_treeview_select(event):
+    selected = result_tree.selection()
+    if not selected:
+        return
+    values = result_tree.item(selected[0], "values")
+    if not values or not values[0] or values[0].startswith("("):
+        # Clear details if nothing valid is selected
+        for key in detail_vars:
+            detail_vars[key].set(f"{key.replace('_', ' ').capitalize()}: -")
+        return
+    username = values[0]
+    # Zeige sofort gecachte Details, falls vorhanden
+    user_details = previous_results.get("user_details", {}).get(username)
+    if user_details:
+        update_detail_panel(user_details)
+    else:
+        # Zeige Platzhalter, bis ggf. Doppelklick für Abruf erfolgt
+        for key in detail_vars:
+            detail_vars[key].set(f"{key.replace('_', ' ').capitalize()}: -")
+
+result_tree.bind("<<TreeviewSelect>>", on_treeview_select)
 
 # Start the UI main loop
 window.mainloop()
