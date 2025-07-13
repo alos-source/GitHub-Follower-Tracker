@@ -58,7 +58,7 @@ def load_previous_results():
                 # Load last username if available
                 metadata = loaded_data.get("_metadata", {})
                 last_username = metadata.get("last_username")
-                if last_username and entry: # Check if entry widget exists
+                if last_username and entry:  # Check if entry widget exists
                     entry.delete(0, tk.END)
                     entry.insert(0, last_username)
 
@@ -67,15 +67,31 @@ def load_previous_results():
                 for username, categories in user_data_loaded.items():
                     previous_results[username] = {}
                     for category, user_list in categories.items():
-                        if category in ("follower_timestamps", "following_timestamps"):
-                            previous_results[username][category] = dict(user_list)
+                        if category in ("follower_timestamps", "following_timestamps", "last_update"):
+                            if isinstance(user_list, dict):
+                                previous_results[username][category] = user_list
+                            elif isinstance(user_list, list):
+                                try:
+                                    previous_results[username][category] = dict(user_list)
+                                except Exception:
+                                    previous_results[username][category] = {}
+                            else:
+                                previous_results[username][category] = {}
+                        elif category == "user_details":
+                            if isinstance(user_list, dict):
+                                previous_results[username][category] = user_list
+                            else:
+                                previous_results[username][category] = {}
                         else:
                             previous_results[username][category] = set(user_list)
+            # Ensure global user_details dict exists
+            if "user_details" not in previous_results or not isinstance(previous_results["user_details"], dict):
+                previous_results["user_details"] = {}
         except (json.JSONDecodeError, IOError) as e:
             messagebox.showerror("Load Error", f"Could not load previous data: {e}")
-            previous_results = {} # Reset to empty if file is corrupt
+            previous_results = {}  # Reset to empty if file is corrupt
             if entry:
-                entry.delete(0, tk.END) # Clear entry field on load error
+                entry.delete(0, tk.END)  # Clear entry field on load error
 
 
 def save_previous_results():
@@ -343,6 +359,83 @@ following_count_label = ttk.Label(count_frame, text="Following: 0")
 following_count_label.pack(side=tk.LEFT, padx=10)
 last_update_label = ttk.Label(count_frame, text="Last update: -")
 last_update_label.pack(side=tk.LEFT, padx=10)
+
+# --- Detail frame for user info ---
+detail_frame = ttk.LabelFrame(window, text="User details", padding=(10, 5))
+detail_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+detail_vars = {
+    "location": tk.StringVar(value="Location: -"),
+    "public_repos": tk.StringVar(value="Public repos: -"),
+    "following": tk.StringVar(value="Following: -"),
+    "followers": tk.StringVar(value="Followers: -"),
+    "created_at": tk.StringVar(value="Created at: -"),
+}
+for var in detail_vars.values():
+    ttk.Label(detail_frame, textvariable=var).pack(anchor="w")
+
+# --- Local cache for user details ---
+if "user_details" not in previous_results:
+    previous_results["user_details"] = {}
+
+import threading
+
+def fetch_and_show_user_details(username):
+    # Check cache first
+    user_details = previous_results["user_details"].get(username)
+    if user_details:
+        update_detail_panel(user_details)
+        return
+
+    # Show loading
+    for key in detail_vars:
+        detail_vars[key].set(f"{key.replace('_', ' ').capitalize()}: ...")
+
+    def fetch():
+        url = f"https://api.github.com/users/{username}"
+        try:
+            resp = requests.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            user_details = {
+                "location": data.get("location", "-"),
+                "public_repos": data.get("public_repos", "-"),
+                "following": data.get("following", "-"),
+                "followers": data.get("followers", "-"),
+                "created_at": data.get("created_at", "-"),
+            }
+            previous_results["user_details"][username] = user_details
+            save_previous_results()
+            window.after(0, lambda: update_detail_panel(user_details))
+        except Exception as e:
+            window.after(0, lambda: [detail_vars[k].set(f"{k.replace('_', ' ').capitalize()}: -") for k in detail_vars])
+            messagebox.showerror("Error", f"Could not fetch details for {username}.\n{e}")
+
+    threading.Thread(target=fetch, daemon=True).start()
+
+def update_detail_panel(user_details):
+    detail_vars["location"].set(f"Location: {user_details.get('location', '-')}")
+    detail_vars["public_repos"].set(f"Public repos: {user_details.get('public_repos', '-')}")
+    detail_vars["following"].set(f"Following: {user_details.get('following', '-')}")
+    detail_vars["followers"].set(f"Followers: {user_details.get('followers', '-')}")
+    detail_vars["created_at"].set(f"Created at: {user_details.get('created_at', '-')}")
+
+
+# --- Double-click to fetch and show details ---
+def on_treeview_double_click(event):
+    item_id = result_tree.identify_row(event.y)
+    if not item_id:
+        return
+    values = result_tree.item(item_id, "values")
+    if not values or not values[0] or values[0].startswith("("):
+        return  # Ignore empty/placeholder rows
+    username = values[0]
+    fetch_and_show_user_details(username)
+    # Optional: open in browser as before
+    # url = f"https://github.com/{username}"
+    # webbrowser.open_new_tab(url)
+
+result_tree.bind("<Double-1>", on_treeview_double_click)
 
 # Start the UI main loop
 window.mainloop()
