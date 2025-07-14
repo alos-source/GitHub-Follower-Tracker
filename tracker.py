@@ -101,11 +101,20 @@ def save_previous_results():
         for category, user_set in categories.items():
             if category in ("follower_timestamps", "following_timestamps"):
                 users_data_to_save[username][category] = dict(user_set)
+            elif category == "user_details":
+                # Korrekt: user_details als dict speichern!
+                if isinstance(user_set, dict):
+                    users_data_to_save[username][category] = user_set
+                else:
+                    users_data_to_save[username][category] = {}
             else:
-                users_data_to_save[username][category] = list(user_set)
-
+                # Nur Sets oder Listen in Listen umwandeln, nicht Dicts!
+                if isinstance(user_set, (set, list)):
+                    users_data_to_save[username][category] = list(user_set)
+                else:
+                    users_data_to_save[username][category] = user_set
     data_to_save = {
-        "_metadata": {"last_username": entry.get() if entry else ""}, # Get current username from entry
+        "_metadata": {"last_username": entry.get() if entry else ""},
         "users": users_data_to_save
     }
     try:
