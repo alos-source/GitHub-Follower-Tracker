@@ -261,7 +261,7 @@ def display_following(force_refresh=False):
 # Create the main window
 window = tk.Tk()
 window.title("GitHub Follower Analyzer")
-window.geometry("500x450") # Increased window size
+window.geometry("700x800") # Increased window size
 
 
 # Create a label and an entry field for the username
@@ -362,7 +362,7 @@ last_update_label.pack(side=tk.LEFT, padx=10)
 
 # --- Detail frame for user info ---
 detail_frame = ttk.LabelFrame(window, text="User details", padding=(10, 5))
-detail_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+detail_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 10))
 
 detail_vars = {
     "location": tk.StringVar(value="Location: -"),
