@@ -7,7 +7,7 @@ import json
 import os
 import webbrowser
 
-import datetime
+from datetime import datetime
 # Stores previously fetched results: {'username': {'followers': set(), 'following': set(), 'not_following_back': set(), 'follower_timestamps': {user: timestamp}}}
 previous_results = {}
 DATA_FILE = "github_tracker_data.json"
@@ -172,7 +172,7 @@ def update_result_display(username, category_key, current_data_list, full_title,
             timestamp_str = ""
             if category_key in ("followers", "following"):
                 if user_login not in timestamps:
-                    timestamps[user_login] = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
+                    timestamps[user_login] = datetime.now().isoformat(sep=' ', timespec='seconds')
                 timestamp_str = timestamps[user_login]
             # Mark new users (not in old_data_set) with a tag
             tags = ("new_user_tag",) if user_login not in old_data_set else ()
@@ -217,7 +217,7 @@ def display_followers(force_refresh=False):
                 previous_results[username] = {}
             if 'last_update' not in previous_results[username]:
                 previous_results[username]['last_update'] = {}
-            previous_results[username]['last_update']['followers'] = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
+            previous_results[username]['last_update']['followers'] = datetime.now().isoformat(sep=' ', timespec='seconds')
     if followers_list is None:
         followers_list = list(previous_results.get(username, {}).get("followers", []))
         if not followers_list:
@@ -244,7 +244,7 @@ def display_following(force_refresh=False):
                 previous_results[username] = {}
             if 'last_update' not in previous_results[username]:
                 previous_results[username]['last_update'] = {}
-            previous_results[username]['last_update']['following'] = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
+            previous_results[username]['last_update']['following'] = datetime.now().isoformat(sep=' ', timespec='seconds')
     if following_list is None:
         following_list = list(previous_results.get(username, {}).get("following", []))
         if not following_list:
